@@ -4,6 +4,7 @@ import os
 import time
 import subprocess
 import sys
+import threading
 
 from colorama import Fore, Style
 from watchdog.events import (
@@ -80,49 +81,54 @@ class ChangeHandler(FileSystemEventHandler):
         runner = self.runner or 'py.test'
         argv = runner.split(' ') + self.args
 
-        # Prepare status update
-        if self.auto_clear:
-            subprocess.call(CLEAR_COMMAND, shell=True)
-        elif summary:
-            print()
+        lock = threading.Lock()
+        lock.acquire(blocking=False)
+        try:
+            # Prepare status update
+            if self.auto_clear:
+                subprocess.call(CLEAR_COMMAND, shell=True)
+            elif summary:
+                print()
 
-        # Print status
-        if not self.quiet:
-            command = ' '.join(argv)
-            highlight = lambda arg: STYLE_HIGHLIGHT + arg + STYLE_NORMAL
-            msg = 'Running: {}'.format(highlight(command))
-            if summary:
-                if self.verbose:
-                    file_lines = ['    {:9s}'.format(event_name + ':') + ' ' +
-                                  ' -> '.join(map(highlight, paths))
-                                  for event_name, paths in summary]
-                    msg = ('Changes detected in files:\n{}\n\nRerunning: {}'
-                           .format('\n'.join(file_lines), highlight(command)))
-                else:
-                    msg = ('Changes detected, rerunning: {}'
-                           .format(highlight(command)))
-            print(STYLE_NORMAL + msg + Fore.RESET + Style.NORMAL)
+            # Print status
+            if not self.quiet:
+                command = ' '.join(argv)
+                highlight = lambda arg: STYLE_HIGHLIGHT + arg + STYLE_NORMAL
+                msg = 'Running: {}'.format(highlight(command))
+                if summary:
+                    if self.verbose:
+                        file_lines = ['    {:9s}'.format(event_name + ':') + ' ' +
+                                      ' -> '.join(map(highlight, paths))
+                                      for event_name, paths in summary]
+                        msg = ('Changes detected in files:\n{}\n\nRerunning: {}'
+                               .format('\n'.join(file_lines), highlight(command)))
+                    else:
+                        msg = ('Changes detected, rerunning: {}'
+                               .format(highlight(command)))
+                print(STYLE_NORMAL + msg + Fore.RESET + Style.NORMAL)
 
-        # Run custom command
-        if self.beforerun:
-            os.system(self.beforerun)
+            # Run custom command
+            if self.beforerun:
+                os.system(self.beforerun)
 
-        # Run py.test or py.test runner
-        exit_code = subprocess.call(argv, shell=(sys.platform == 'win32'))
-        # py.test returns exit code 5 in case no tests are run/collected.
-        # This can happen with tools like pytest-testmon.
-        passed = exit_code == 0 or (runner == 'py.test' and exit_code == 5)
+            # Run py.test or py.test runner
+            exit_code = subprocess.call(argv, shell=(sys.platform == 'win32'))
+            # py.test returns exit code 5 in case no tests are run/collected.
+            # This can happen with tools like pytest-testmon.
+            passed = exit_code == 0 or (runner == 'py.test' and exit_code == 5)
 
-        # Beep if failed
-        if not passed and self.beep_on_failure:
-            sys.stdout.write(BEEP_CHARACTER)
-            sys.stdout.flush()
+            # Beep if failed
+            if not passed and self.beep_on_failure:
+                sys.stdout.write(BEEP_CHARACTER)
+                sys.stdout.flush()
 
-        # Run custom commands
-        if passed and self.onpass:
-            os.system(self.onpass)
-        elif not passed and self.onfail:
-            os.system(self.onfail)
+            # Run custom commands
+            if passed and self.onpass:
+                os.system(self.onpass)
+            elif not passed and self.onfail:
+                os.system(self.onfail)
+        finally:
+            lock.release()
 
 
 def watch(directories=[], ignore=[], auto_clear=False, beep_on_failure=True,
